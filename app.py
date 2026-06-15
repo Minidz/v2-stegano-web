@@ -1,5 +1,6 @@
 import io
 import os
+import threading
 from pathlib import Path
 from typing import Union, Tuple
 
@@ -33,6 +34,7 @@ MODEL_PATH = Path(__file__).parent / "models/model_GAN/endecode_GAN.pt"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 THRESHOLD = 0.5
 TORCH_NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
+PRELOAD_MODEL = os.environ.get("PRELOAD_MODEL", "false").lower() in {"1", "true", "yes"}
 torch.set_num_threads(TORCH_NUM_THREADS)
 
 app = FastAPI(
@@ -44,6 +46,7 @@ UI_PATH = "/ui"
 encoder = None
 decoder = None
 rs = None
+model_lock = threading.Lock()
 
 
 def _get_closest_valid_size(width: int, height: int) -> Tuple[int, int]:
@@ -173,14 +176,34 @@ def load_models() -> None:
         rs = RSCodec(250)
 
 
+def ensure_models_loaded() -> None:
+    if encoder is not None and decoder is not None:
+        return
+
+    with model_lock:
+        if encoder is None or decoder is None:
+            load_models()
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
-    load_models()
+    if PRELOAD_MODEL:
+        ensure_models_loaded()
 
 
 @app.get("/", include_in_schema=False)
 async def root() -> RedirectResponse:
     return RedirectResponse(url=UI_PATH)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> JSONResponse:
+    return JSONResponse({
+        "status": "ok",
+        "model_loaded": encoder is not None and decoder is not None,
+        "device": str(DEVICE),
+        "max_image_size": MAX_SIZE,
+    })
 
 
 @app.post("/encode")
@@ -190,6 +213,8 @@ async def encode(cover_image: UploadFile = File(...), message: str = Form(...)):
             status_code=400,
             detail="Upload a PNG or JPEG image file for cover image.",
         )
+
+    ensure_models_loaded()
 
     image_bytes = await cover_image.read()
     pil_image = _load_image_bytes(image_bytes)
@@ -231,6 +256,8 @@ async def decode(stego_image: UploadFile = File(...)) -> JSONResponse:
             detail="Upload a PNG or JPEG image file for stego image.",
         )
 
+    ensure_models_loaded()
+
     image_bytes = await stego_image.read()
     pil_image = _load_image_bytes(image_bytes)
     image_tensor = _image_to_tensor(pil_image).to(DEVICE)
@@ -261,6 +288,8 @@ def _read_bytes_from_input(file: Union[str, object]) -> bytes:
 
 
 def _gradio_encode(file, message):
+    ensure_models_loaded()
+
     image_bytes = _read_bytes_from_input(file)
     pil_image = _load_image_bytes(image_bytes)
     image_tensor = _image_to_tensor(pil_image).to(DEVICE)
@@ -287,6 +316,8 @@ def _gradio_encode(file, message):
 
 
 def _gradio_decode(file):
+    ensure_models_loaded()
+
     image_bytes = _read_bytes_from_input(file)
     pil_image = _load_image_bytes(image_bytes)
     image_tensor = _image_to_tensor(pil_image).to(DEVICE)
