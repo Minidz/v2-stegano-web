@@ -27,7 +27,7 @@ from models import DenseDecoder, DenseEncoder
 DATA_DEPTH = 4
 HIDDEN_SIZE = 32
 MIN_SIZE = 128
-MODEL_PATH = Path("models/model_GAN/endecode_GAN.pt")
+MODEL_PATH = Path(__file__).parent / "models/model_GAN/endecode_GAN.pt"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 THRESHOLD = 0.5
 
