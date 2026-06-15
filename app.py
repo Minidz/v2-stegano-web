@@ -5,7 +5,7 @@ from typing import Union, Tuple
 
 import gradio as gr
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from gradio import mount_gradio_app
 
 from PIL import Image
@@ -36,6 +36,7 @@ app = FastAPI(
     title="Steganography Demo API",
     description="Upload an image to encode a secret message or decode a hidden message from an image.",
 )
+UI_PATH = "/ui"
 
 encoder = None
 decoder = None
@@ -174,6 +175,11 @@ async def startup_event() -> None:
     load_models()
 
 
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url=UI_PATH)
+
+
 @app.post("/encode")
 async def encode(cover_image: UploadFile = File(...), message: str = Form(...)):
     if cover_image.content_type not in {"image/png", "image/jpeg", "image/jpg"}:
@@ -309,7 +315,7 @@ with demo:
         decode_button.click(_gradio_decode, stego_input, decoded_output)
 
 
-mount_gradio_app(app, demo, path="/")
+mount_gradio_app(app, demo, path=UI_PATH)
 
 
 if __name__ == "__main__":
